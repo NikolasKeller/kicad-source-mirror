@@ -1,0 +1,226 @@
+name: Build KiCAD AI Edition
+
+on:
+  push:
+    branches:
+      - claude/kicad-ai-integration-*
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          mingw-w64-x86_64-toolchain
+          mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-ninja
+          mingw-w64-x86_64-wxwidgets3.2-msw
+          mingw-w64-x86_64-curl
+          mingw-w64-x86_64-glew
+          mingw-w64-x86_64-glm
+          mingw-w64-x86_64-cairo
+          mingw-w64-x86_64-boost
+          mingw-w64-x86_64-python
+          mingw-w64-x86_64-opencascade
+          mingw-w64-x86_64-ngspice
+          git
+
+    - name: Configure CMake
+      shell: msys2 {0}
+      run: |
+        mkdir -p build
+        cd build
+        cmake .. \
+          -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX=/usr/local \
+          -DKICAD_SCRIPTING_WXPYTHON=OFF \
+          -DKICAD_BUILD_I18N=OFF
+
+    - name: Build KiCAD
+      shell: msys2 {0}
+      run: |
+        cd build
+        ninja -j4
+
+    - name: Package binaries
+      shell: msys2 {0}
+      run: |
+        cd build
+        mkdir -p kicad-ai-windows
+        cp -r pcbnew/pcbnew.exe kicad-ai-windows/
+        cp -r eeschema/eeschema.exe kicad-ai-windows/
+        cp -r kicad/kicad.exe kicad-ai-windows/
+
+        # Copy required DLLs
+        ldd pcbnew/pcbnew.exe | grep mingw64 | awk '{print $3}' | xargs -I {} cp {} kicad-ai-windows/
+
+        # Create README
+        cat > kicad-ai-windows/README.txt << 'EOF'
+KiCAD AI Edition - Windows Build
+
+To use the AI Assistant:
+1. Set your Anthropic API key as an environment variable:
+   set ANTHROPIC_API_KEY=your-key-here
+
+2. Launch KiCAD:
+   - kicad.exe (main project manager)
+   - pcbnew.exe (PCB editor with AI)
+   - eeschema.exe (Schematic editor with AI)
+
+3. Look for the "AI Assistant" panel on the right side
+4. Click "Settings" to configure your API key if you didn't use the environment variable
+5. Start chatting with Claude about your PCB design!
+
+Get your API key from: https://console.anthropic.com/
+EOF
+
+        # Create a zip
+        7z a kicad-ai-windows.zip kicad-ai-windows/
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kicad-ai-windows-x64
+        path: build/kicad-ai-windows.zip
+        retention-days: 90
+
+    - name: Create Release
+      if: github.ref == 'refs/heads/claude/kicad-ai-integration-013V9a4bZzmJXo1wrawHZ7LB'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v1.0-ai-beta-${{ github.run_number }}
+        name: KiCAD AI Edition v1.0-beta-${{ github.run_number }}
+        body: |
+          ## KiCAD with Native Claude AI Integration
+
+          ### What's New
+          - 🤖 Native Claude AI assistant panel in PCB Editor
+          - 🤖 Native Claude AI assistant panel in Schematic Editor
+          - 💬 Real-time streaming responses
+          - 📝 Conversation history management
+          - ⚙️ Easy API key configuration
+
+          ### Download
+          Download `kicad-ai-windows.zip`, extract it, and run the executables.
+
+          ### Setup
+          1. Get an API key from https://console.anthropic.com/
+          2. Set environment variable: `set ANTHROPIC_API_KEY=your-key`
+          3. Launch pcbnew.exe or eeschema.exe
+          4. Find the AI Assistant panel and start designing!
+
+          ### System Requirements
+          - Windows 10/11 (64-bit)
+          - Internet connection for AI features
+          - Anthropic API key
+        files: build/kicad-ai-windows.zip
+        draft: false
+        prerelease: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          ninja-build \
+          libwxgtk3.2-dev \
+          libglm-dev \
+          libboost-all-dev \
+          libcurl4-openssl-dev \
+          libglew-dev \
+          libcairo2-dev \
+          libngspice0-dev \
+          libocct-data-exchange-dev \
+          libocct-foundation-dev \
+          libocct-modeling-algorithms-dev \
+          libocct-ocaf-dev \
+          libocct-visualization-dev \
+          python3-dev \
+          swig
+
+    - name: Configure CMake
+      run: |
+        mkdir -p build
+        cd build
+        cmake .. \
+          -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX=/usr/local \
+          -DKICAD_SCRIPTING_WXPYTHON=OFF \
+          -DKICAD_BUILD_I18N=OFF
+
+    - name: Build KiCAD
+      run: |
+        cd build
+        ninja -j$(nproc)
+
+    - name: Package binaries
+      run: |
+        cd build
+        mkdir -p kicad-ai-linux
+        cp pcbnew/pcbnew kicad-ai-linux/
+        cp eeschema/eeschema kicad-ai-linux/
+        cp kicad/kicad kicad-ai-linux/
+
+        # Create README
+        cat > kicad-ai-linux/README.md << 'EOF'
+# KiCAD AI Edition - Linux Build
+
+## Setup
+1. Install runtime dependencies:
+   ```bash
+   sudo apt-get install libwxgtk3.2-1 libcurl4 libglew2.2 libcairo2 libboost-filesystem1.74.0
+   ```
+
+2. Set your Anthropic API key:
+   ```bash
+   export ANTHROPIC_API_KEY=your-key-here
+   ```
+
+3. Launch KiCAD:
+   ```bash
+   ./pcbnew  # PCB editor with AI
+   ./eeschema  # Schematic editor with AI
+   ./kicad  # Main project manager
+   ```
+
+## AI Assistant
+- Look for the "AI Assistant" panel on the right side
+- Click "Settings" to configure your API key
+- Start chatting with Claude about PCB design!
+
+Get your API key from: https://console.anthropic.com/
+EOF
+
+        tar czf kicad-ai-linux.tar.gz kicad-ai-linux/
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kicad-ai-linux-x64
+        path: build/kicad-ai-linux.tar.gz
+        retention-days: 90
